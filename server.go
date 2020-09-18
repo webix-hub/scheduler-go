@@ -1,10 +1,12 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -18,6 +20,12 @@ import (
 
 var format = render.New()
 
+type Response struct {
+	Invalid bool   `json:"invalid"`
+	Error   string `json:"error"`
+	ID      string `json:"id"`
+}
+
 type EventInfo struct {
 	ID        int    `json:"id"`
 	Text      string `json:"text"`
@@ -25,9 +33,16 @@ type EventInfo struct {
 	EndDate   string `db:"end_date" json:"end_date"`
 	Color     string `json:"color"`
 	Calendar  int    `json:"calendar"`
-	Detains   string `json:"details"`
+	Details   string `json:"details"`
 	AllDay    int    `db:"all_day" json:"all_day"`
 	Recurring string `json:"recurring"`
+}
+
+type CalendarInfo struct {
+	ID     int    `json:"id"`
+	Text   string `json:"text"`
+	Color  string `json:"color"`
+	Active int    `json:"active"`
 }
 
 var conn *sqlx.DB
@@ -88,56 +103,148 @@ func main() {
 		from := r.URL.Query().Get("from")
 		to := r.URL.Query().Get("to")
 
-		var data []EventInfo
+		data := make([]EventInfo, 0)
 		var qs string
+		var err error
 
 		if from != "" && to != "" {
 			qs = "SELECT event.* FROM event WHERE start_date < ? AND end_date >= ? ORDER BY start_date;"
-
-			// 	start_date:{$lt:to+" 24:00"},
-			// 	end_date:{$gte:from}
-
+			err = conn.Select(&data, qs, to, from)
 		} else {
 			qs = "SELECT event.* FROM event ORDER BY start_date;"
+			err = conn.Select(&data, qs)
 		}
 
-		err := conn.Select(&data, qs, to, from)
-
 		if err != nil {
-			panic(err)
+			format.Text(w, 500, err.Error())
+			return
 		}
 
 		format.JSON(w, 200, data)
 	})
 
 	r.Put("/events/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		r.ParseForm()
 
+		err := sendUpdateQuery("event", r.Form, id)
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+
+		format.JSON(w, 200, Response{ID: id})
 	})
 
 	r.Delete("/events/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
 
+		_, err := conn.Exec("DELETE FROM event WHERE id = ?", id)
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+
+		format.JSON(w, 200, Response{ID: id})
 	})
 
 	r.Post("/events", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
 
+		res, err := sendInsertQuery("event", r.Form)
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+
+		id, _ := res.LastInsertId()
+		format.JSON(w, 200, Response{ID: strconv.FormatInt(id, 10)})
 	})
 
 	r.Get("/calendars", func(w http.ResponseWriter, r *http.Request) {
+		data := make([]CalendarInfo, 0)
+		err := conn.Select(&data, "SELECT calendar.* FROM calendar;")
 
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+
+		format.JSON(w, 200, data)
 	})
 
 	r.Put("/calendars/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		r.ParseForm()
 
+		err := sendUpdateQuery("calendar", r.Form, id)
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+
+		format.JSON(w, 200, Response{ID: id})
 	})
 
 	r.Delete("/calendars/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
 
+		_, err := conn.Exec("DELETE FROM calendar WHERE id = ?", id)
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+		_, err = conn.Exec("DELETE FROM event WHERE calendar = ?", id)
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+
+		format.JSON(w, 200, Response{ID: id})
 	})
 
 	r.Post("/calendars", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
 
+		res, err := sendInsertQuery("calendar", r.Form)
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+
+		id, _ := res.LastInsertId()
+		format.JSON(w, 200, Response{ID: strconv.FormatInt(id, 10)})
 	})
 
 	log.Printf("Starting webserver at port " + Config.Port)
 	http.ListenAndServe(Config.Port, r)
+}
+
+func sendUpdateQuery(table string, form map[string][]string, id string) error {
+	qs := "UPDATE " + table + " SET "
+	params := make([]interface{}, 0)
+	for key, values := range form {
+		qs += key + " = ?, "
+		params = append(params, values[0])
+	}
+	params = append(params, id)
+
+	_, err := conn.Exec(qs[:len(qs)-2]+" WHERE id = ?", params...)
+	return err
+}
+
+func sendInsertQuery(table string, form map[string][]string) (sql.Result, error) {
+	qsk := "INSERT INTO " + table + " ("
+	qsv := "VALUES ("
+	params := make([]interface{}, 0)
+	for key, values := range form {
+		qsk += key + ", "
+		qsv += "?, "
+		params = append(params, values[0])
+	}
+	qsk = qsk[:len(qsk)-2] + ") "
+	qsv = qsv[:len(qsv)-2] + ")"
+
+	res, err := conn.Exec(qsk+qsv, params...)
+	return res, err
 }
