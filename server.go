@@ -36,6 +36,7 @@ type EventInfo struct {
 	Details   string `json:"details"`
 	AllDay    int    `db:"all_day" json:"all_day"`
 	Recurring string `json:"recurring"`
+	OriginID  int    `db:"origin_id" json:"origin_id"`
 }
 
 type CalendarInfo struct {
@@ -123,7 +124,7 @@ func main() {
 		format.JSON(w, 200, data)
 	})
 
-	r.Put("/events/{id}", func(w http.ResponseWriter, r *http.Request) {
+	r.Put("/events/{unite}/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		r.ParseForm()
 
@@ -131,6 +132,15 @@ func main() {
 		if err != nil {
 			format.Text(w, 500, err.Error())
 			return
+		}
+
+		unite := chi.URLParam(r, "unite")
+		if unite == "unite" {
+			_, err := conn.Exec("DELETE FROM event WHERE origin_id = ?", id)
+			if err != nil {
+				format.Text(w, 500, err.Error())
+				return
+			}
 		}
 
 		format.JSON(w, 200, Response{ID: id})
