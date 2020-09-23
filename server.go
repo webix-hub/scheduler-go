@@ -124,7 +124,7 @@ func main() {
 		format.JSON(w, 200, data)
 	})
 
-	r.Put("/events/{unite}/{id}", func(w http.ResponseWriter, r *http.Request) {
+	r.Put("/events/{mode}/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		r.ParseForm()
 
@@ -134,9 +134,21 @@ func main() {
 			return
 		}
 
-		unite := chi.URLParam(r, "unite")
-		if unite == "unite" {
+		mode := chi.URLParam(r, "mode")
+		if mode == "unite" {
 			_, err := conn.Exec("DELETE FROM event WHERE origin_id = ?", id)
+			if err != nil {
+				format.Text(w, 500, err.Error())
+				return
+			}
+		} else if mode == "next" {
+			var ostart string // [FIXME] start_date of new section
+			err := conn.Get(&ostart, "SELECT start_date FROM event WHERE id = ?", id)
+			if err != nil {
+				format.Text(w, 500, err.Error())
+				return
+			}
+			_, err = conn.Exec("DELETE FROM event WHERE origin_id = ? AND start_date > ?", id, ostart)
 			if err != nil {
 				format.Text(w, 500, err.Error())
 				return
@@ -149,7 +161,7 @@ func main() {
 	r.Delete("/events/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 
-		_, err := conn.Exec("DELETE FROM event WHERE id = ?", id)
+		_, err := conn.Exec("DELETE FROM event WHERE id = ? OR origin_id = ?", id, id)
 		if err != nil {
 			format.Text(w, 500, err.Error())
 			return
@@ -173,7 +185,7 @@ func main() {
 
 	r.Get("/calendars", func(w http.ResponseWriter, r *http.Request) {
 		data := make([]CalendarInfo, 0)
-		err := conn.Select(&data, "SELECT calendar.* FROM calendar;")
+		err := conn.Select(&data, "SELECT calendar.* FROM calendar")
 
 		if err != nil {
 			format.Text(w, 500, err.Error())
