@@ -2,10 +2,12 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/go-chi/chi"
@@ -124,31 +126,37 @@ func main() {
 		format.JSON(w, 200, data)
 	})
 
-	r.Put("/events/{mode}/{id}", func(w http.ResponseWriter, r *http.Request) {
+	r.Put("/events/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		r.ParseForm()
 
-		err := sendUpdateQuery("event", r.Form, id)
+		event, err := getEvent(r.Form.Get("event"))
 		if err != nil {
 			format.Text(w, 500, err.Error())
 			return
 		}
 
-		mode := chi.URLParam(r, "mode")
+		err = updateRecordFromObj(event, id)
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+
+		mode := r.Form.Get("mode")
 		if mode == "unite" {
+			// remove all sub-events
 			_, err := conn.Exec("DELETE FROM event WHERE origin_id = ?", id)
 			if err != nil {
 				format.Text(w, 500, err.Error())
 				return
 			}
 		} else if mode == "next" {
-			var ostart string // [FIXME] start_date of new section
-			err := conn.Get(&ostart, "SELECT start_date FROM event WHERE id = ?", id)
-			if err != nil {
-				format.Text(w, 500, err.Error())
-				return
+			// remove all sub-events after new 'this and next' group
+			date := r.Form.Get("date")
+			if date == "" {
+				panic("date must be provided")
 			}
-			_, err = conn.Exec("DELETE FROM event WHERE origin_id = ? AND start_date > ?", id, ostart)
+			_, err = conn.Exec("DELETE FROM event WHERE origin_id = ? AND start_date > ?", id, date)
 			if err != nil {
 				format.Text(w, 500, err.Error())
 				return
@@ -199,7 +207,7 @@ func main() {
 		id := chi.URLParam(r, "id")
 		r.ParseForm()
 
-		err := sendUpdateQuery("calendar", r.Form, id)
+		err := updateRecordFromForm(r.Form, id)
 		if err != nil {
 			format.Text(w, 500, err.Error())
 			return
@@ -242,15 +250,42 @@ func main() {
 	http.ListenAndServe(Config.Port, r)
 }
 
-func sendUpdateQuery(table string, form map[string][]string, id string) error {
-	qs := "UPDATE " + table + " SET "
-	params := make([]interface{}, 0)
-	for key, values := range form {
-		qs += key + " = ?, "
-		params = append(params, values[0])
+func getEvent(jsonObj string) (map[string]interface{}, error) {
+	data := []byte(jsonObj)
+	event := make(map[string]interface{})
+	err := json.Unmarshal(data, &event)
+	if err != nil {
+		return nil, err
 	}
-	params = append(params, id)
+	return event, nil
+}
 
+func updateRecordFromObj(obj map[string]interface{}, id string) error {
+	qs := "UPDATE event SET "
+	params := make([]interface{}, 0)
+	for key := range obj {
+		qs += key + " = ?, "
+		params = append(params, obj[key])
+	}
+
+	err := sendRequest(params, id, qs)
+	return err
+}
+
+func updateRecordFromForm(form url.Values, id string) error {
+	qs := "UPDATE calendar SET "
+	params := make([]interface{}, 0)
+	for key := range form {
+		qs += key + " = ?, "
+		params = append(params, form.Get(key))
+	}
+
+	err := sendRequest(params, id, qs)
+	return err
+}
+
+func sendRequest(params []interface{}, id string, qs string) error {
+	params = append(params, id)
 	_, err := conn.Exec(qs[:len(qs)-2]+" WHERE id = ?", params...)
 	return err
 }
