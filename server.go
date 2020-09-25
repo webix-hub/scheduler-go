@@ -143,6 +143,7 @@ func main() {
 		}
 
 		mode := r.Form.Get("mode")
+
 		if mode == "unite" {
 			// remove all sub-events
 			_, err := conn.Exec("DELETE FROM event WHERE origin_id = ?", id)
@@ -156,7 +157,19 @@ func main() {
 			if date == "" {
 				panic("date must be provided")
 			}
-			_, err = conn.Exec("DELETE FROM event WHERE origin_id = ? AND start_date > ?", id, date)
+
+			// in case update came for a subevent, search the master event
+			var oid int
+			err = conn.Get(&oid, "SELECT origin_id FROM event WHERE id = ?", id)
+			if err != nil {
+				format.Text(w, 500, err.Error())
+				return
+			}
+			if oid != 0 {
+				id = strconv.Itoa(oid)
+			}
+
+			_, err = conn.Exec("DELETE FROM event WHERE origin_id = ? AND start_date >= ?", id, date)
 			if err != nil {
 				format.Text(w, 500, err.Error())
 				return
