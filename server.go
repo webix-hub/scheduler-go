@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -130,20 +129,13 @@ func main() {
 		id := chi.URLParam(r, "id")
 		r.ParseForm()
 
-		event, err := getEvent(r.Form.Get("event"))
+		err = sendUpdateQuery("event", r.Form, id)
 		if err != nil {
 			format.Text(w, 500, err.Error())
 			return
 		}
 
-		err = updateRecordFromObj(event, id)
-		if err != nil {
-			format.Text(w, 500, err.Error())
-			return
-		}
-
-		mode := r.Form.Get("mode")
-
+		mode := r.Form.Get("recurring_update_mode")
 		if mode == "unite" {
 			// remove all sub-events
 			_, err := conn.Exec("DELETE FROM event WHERE origin_id = ?", id)
@@ -153,7 +145,7 @@ func main() {
 			}
 		} else if mode == "next" {
 			// remove all sub-events after new 'this and next' group
-			date := r.Form.Get("date")
+			date := r.Form.Get("recurring_update_date")
 			if date == "" {
 				panic("date must be provided")
 			}
@@ -220,7 +212,7 @@ func main() {
 		id := chi.URLParam(r, "id")
 		r.ParseForm()
 
-		err := updateRecordFromForm(r.Form, id)
+		err := sendUpdateQuery("calendar", r.Form, id)
 		if err != nil {
 			format.Text(w, 500, err.Error())
 			return
@@ -263,42 +255,48 @@ func main() {
 	http.ListenAndServe(Config.Port, r)
 }
 
-func getEvent(jsonObj string) (map[string]interface{}, error) {
-	data := []byte(jsonObj)
-	event := make(map[string]interface{})
-	err := json.Unmarshal(data, &event)
-	if err != nil {
-		return nil, err
-	}
-	return event, nil
+// both event and calendar tables
+var whitelistEvent = []string{
+	"start_date",
+	"end_date",
+	"all_day",
+	"text",
+	"details",
+	"color",
+	"recurring",
+	"calendar",
+	"origin_id",
+}
+var whitelistCalendar = []string{
+	"text",
+	"color",
+	"active",
 }
 
-func updateRecordFromObj(obj map[string]interface{}, id string) error {
-	qs := "UPDATE event SET "
+func getWhiteList(table string) []string {
+	allowedFields := make([]string, 0, 10)
+	if table == "event" {
+		allowedFields = append(allowedFields, whitelistEvent...)
+	} else {
+		allowedFields = append(allowedFields, whitelistCalendar...)
+	}
+	return allowedFields
+}
+
+func sendUpdateQuery(table string, form url.Values, id string) error {
+	qs := "UPDATE " + table + " SET "
 	params := make([]interface{}, 0)
-	for key := range obj {
-		qs += key + " = ?, "
-		params = append(params, obj[key])
+
+	allowedFields := getWhiteList(table)
+	for _, key := range allowedFields {
+		value, ok := form[key]
+		if ok {
+			qs += key + " = ?, "
+			params = append(params, value[0])
+		}
 	}
-
-	err := sendRequest(params, id, qs)
-	return err
-}
-
-func updateRecordFromForm(form url.Values, id string) error {
-	qs := "UPDATE calendar SET "
-	params := make([]interface{}, 0)
-	for key := range form {
-		qs += key + " = ?, "
-		params = append(params, form.Get(key))
-	}
-
-	err := sendRequest(params, id, qs)
-	return err
-}
-
-func sendRequest(params []interface{}, id string, qs string) error {
 	params = append(params, id)
+
 	_, err := conn.Exec(qs[:len(qs)-2]+" WHERE id = ?", params...)
 	return err
 }
@@ -307,11 +305,17 @@ func sendInsertQuery(table string, form map[string][]string) (sql.Result, error)
 	qsk := "INSERT INTO " + table + " ("
 	qsv := "VALUES ("
 	params := make([]interface{}, 0)
-	for key, values := range form {
-		qsk += key + ", "
-		qsv += "?, "
-		params = append(params, values[0])
+
+	allowedFields := getWhiteList(table)
+	for _, key := range allowedFields {
+		value, ok := form[key]
+		if ok {
+			qsk += key + ", "
+			qsv += "?, "
+			params = append(params, value[0])
+		}
 	}
+
 	qsk = qsk[:len(qsk)-2] + ") "
 	qsv = qsv[:len(qsv)-2] + ")"
 
