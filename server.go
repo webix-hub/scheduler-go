@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/go-chi/chi"
@@ -36,6 +37,7 @@ type EventInfo struct {
 	Details   string `json:"details"`
 	AllDay    int    `db:"all_day" json:"all_day"`
 	Recurring string `json:"recurring"`
+	OriginID  int    `db:"origin_id" json:"origin_id"`
 }
 
 type CalendarInfo struct {
@@ -127,10 +129,43 @@ func main() {
 		id := chi.URLParam(r, "id")
 		r.ParseForm()
 
-		err := sendUpdateQuery("event", r.Form, id)
+		err = sendUpdateQuery("event", r.Form, id)
 		if err != nil {
 			format.Text(w, 500, err.Error())
 			return
+		}
+
+		mode := r.Form.Get("recurring_update_mode")
+		if mode == "unite" {
+			// remove all sub-events
+			_, err := conn.Exec("DELETE FROM event WHERE origin_id = ?", id)
+			if err != nil {
+				format.Text(w, 500, err.Error())
+				return
+			}
+		} else if mode == "next" {
+			// remove all sub-events after new 'this and next' group
+			date := r.Form.Get("recurring_update_date")
+			if date == "" {
+				panic("date must be provided")
+			}
+
+			// in case update came for a subevent, search the master event
+			var oid int
+			err = conn.Get(&oid, "SELECT origin_id FROM event WHERE id = ?", id)
+			if err != nil {
+				format.Text(w, 500, err.Error())
+				return
+			}
+			if oid != 0 {
+				id = strconv.Itoa(oid)
+			}
+
+			_, err = conn.Exec("DELETE FROM event WHERE origin_id = ? AND start_date >= ?", id, date)
+			if err != nil {
+				format.Text(w, 500, err.Error())
+				return
+			}
 		}
 
 		format.JSON(w, 200, Response{ID: id})
@@ -139,7 +174,7 @@ func main() {
 	r.Delete("/events/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 
-		_, err := conn.Exec("DELETE FROM event WHERE id = ?", id)
+		_, err := conn.Exec("DELETE FROM event WHERE id = ? OR origin_id = ?", id, id)
 		if err != nil {
 			format.Text(w, 500, err.Error())
 			return
@@ -163,7 +198,7 @@ func main() {
 
 	r.Get("/calendars", func(w http.ResponseWriter, r *http.Request) {
 		data := make([]CalendarInfo, 0)
-		err := conn.Select(&data, "SELECT calendar.* FROM calendar;")
+		err := conn.Select(&data, "SELECT calendar.* FROM calendar")
 
 		if err != nil {
 			format.Text(w, 500, err.Error())
@@ -220,12 +255,45 @@ func main() {
 	http.ListenAndServe(Config.Port, r)
 }
 
-func sendUpdateQuery(table string, form map[string][]string, id string) error {
+// both event and calendar tables
+var whitelistEvent = []string{
+	"start_date",
+	"end_date",
+	"all_day",
+	"text",
+	"details",
+	"color",
+	"recurring",
+	"calendar",
+	"origin_id",
+}
+var whitelistCalendar = []string{
+	"text",
+	"color",
+	"active",
+}
+
+func getWhiteList(table string) []string {
+	allowedFields := make([]string, 0, 10)
+	if table == "event" {
+		allowedFields = append(allowedFields, whitelistEvent...)
+	} else {
+		allowedFields = append(allowedFields, whitelistCalendar...)
+	}
+	return allowedFields
+}
+
+func sendUpdateQuery(table string, form url.Values, id string) error {
 	qs := "UPDATE " + table + " SET "
 	params := make([]interface{}, 0)
-	for key, values := range form {
-		qs += key + " = ?, "
-		params = append(params, values[0])
+
+	allowedFields := getWhiteList(table)
+	for _, key := range allowedFields {
+		value, ok := form[key]
+		if ok {
+			qs += key + " = ?, "
+			params = append(params, value[0])
+		}
 	}
 	params = append(params, id)
 
@@ -237,11 +305,17 @@ func sendInsertQuery(table string, form map[string][]string) (sql.Result, error)
 	qsk := "INSERT INTO " + table + " ("
 	qsv := "VALUES ("
 	params := make([]interface{}, 0)
-	for key, values := range form {
-		qsk += key + ", "
-		qsv += "?, "
-		params = append(params, values[0])
+
+	allowedFields := getWhiteList(table)
+	for _, key := range allowedFields {
+		value, ok := form[key]
+		if ok {
+			qsk += key + ", "
+			qsv += "?, "
+			params = append(params, value[0])
+		}
 	}
+
 	qsk = qsk[:len(qsk)-2] + ") "
 	qsv = qsv[:len(qsv)-2] + ")"
 
