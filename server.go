@@ -136,7 +136,7 @@ func main() {
 		}
 
 		mode := r.Form.Get("recurring_update_mode")
-		if mode == "unite" {
+		if mode == "all" {
 			// remove all sub-events
 			_, err := conn.Exec("DELETE FROM event WHERE origin_id = ?", id)
 			if err != nil {
