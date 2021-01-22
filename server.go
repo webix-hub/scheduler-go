@@ -21,12 +21,14 @@ import (
 
 var format = render.New()
 
+// Response describes a general response
 type Response struct {
 	Invalid bool   `json:"invalid"`
 	Error   string `json:"error"`
 	ID      string `json:"id"`
 }
 
+// EventInfo describes data fields
 type EventInfo struct {
 	ID        int    `json:"id"`
 	Text      string `json:"text"`
@@ -40,6 +42,7 @@ type EventInfo struct {
 	OriginID  int    `db:"origin_id" json:"origin_id"`
 }
 
+// CalendarInfo describes calendar data fields
 type CalendarInfo struct {
 	ID     int    `json:"id"`
 	Text   string `json:"text"`
@@ -47,8 +50,10 @@ type CalendarInfo struct {
 	Active int    `json:"active"`
 }
 
+//
 var conn *sqlx.DB
 
+// AppConfig describes application configuration
 type AppConfig struct {
 	Port         string
 	ResetOnStart bool
@@ -56,6 +61,7 @@ type AppConfig struct {
 	DB DBConfig
 }
 
+// DBConfig describes database configuration
 type DBConfig struct {
 	Host     string `default:"localhost"`
 	Port     string `default:"3306"`
@@ -64,6 +70,7 @@ type DBConfig struct {
 	Database string `default:"calendar"`
 }
 
+// Config is a structure with settings of this app instance
 var Config AppConfig
 
 func main() {
@@ -110,16 +117,21 @@ func main() {
 		var err error
 
 		if from != "" && to != "" {
-			qs = "SELECT event.* FROM event WHERE start_date < ? AND end_date >= ? ORDER BY start_date;"
+			qs = "SELECT event.* FROM event WHERE start_date < ? AND (recurring != '' OR end_date >= ?) ORDER BY start_date;"
 			err = conn.Select(&data, qs, to, from)
+			if err != nil {
+				format.Text(w, 500, err.Error())
+				return
+			}
+
+			data = FilterRecurringEvents(data, from)
 		} else {
 			qs = "SELECT event.* FROM event ORDER BY start_date;"
 			err = conn.Select(&data, qs)
-		}
-
-		if err != nil {
-			format.Text(w, 500, err.Error())
-			return
+			if err != nil {
+				format.Text(w, 500, err.Error())
+				return
+			}
 		}
 
 		format.JSON(w, 200, data)
