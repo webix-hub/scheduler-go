@@ -30,16 +30,17 @@ type Response struct {
 
 // EventInfo describes data fields
 type EventInfo struct {
-	ID        int    `json:"id"`
-	Text      string `json:"text"`
-	StartDate string `db:"start_date" json:"start_date"`
-	EndDate   string `db:"end_date" json:"end_date"`
-	Color     string `json:"color"`
-	Calendar  int    `json:"calendar"`
-	Details   string `json:"details"`
-	AllDay    int    `db:"all_day" json:"all_day"`
-	Recurring string `json:"recurring"`
-	OriginID  int    `db:"origin_id" json:"origin_id"`
+	ID            int    `json:"id"`
+	Text          string `json:"text"`
+	StartDate     string `db:"start_date" json:"start_date"`
+	EndDate       string `db:"end_date" json:"end_date"`
+	Color         string `json:"color"`
+	Calendar      int    `json:"calendar"`
+	Details       string `json:"details"`
+	AllDay        int    `db:"all_day" json:"all_day"`
+	Recurring     string `json:"recurring"`
+	OriginID      int    `db:"origin_id" json:"origin_id"`
+	SeriesEndDate string `db:"series_end_date" json:"series_end_date"`
 }
 
 // CalendarInfo describes calendar data fields
@@ -117,14 +118,12 @@ func main() {
 		var err error
 
 		if from != "" && to != "" {
-			qs = "SELECT event.* FROM event WHERE start_date < ? AND (recurring != '' OR end_date >= ?) ORDER BY start_date;"
-			err = conn.Select(&data, qs, to, from)
+			qs = "SELECT event.* FROM event WHERE start_date < ? AND (series_end_date >= ? OR recurring != '' AND series_end_date = '' OR end_date >= ?) ORDER BY start_date;"
+			err = conn.Select(&data, qs, to, from, from)
 			if err != nil {
 				format.Text(w, 500, err.Error())
 				return
 			}
-
-			data = FilterRecurringEvents(data, from)
 		} else {
 			qs = "SELECT event.* FROM event ORDER BY start_date;"
 			err = conn.Select(&data, qs)
@@ -278,6 +277,7 @@ var whitelistEvent = []string{
 	"recurring",
 	"calendar",
 	"origin_id",
+	"series_end_date",
 }
 var whitelistCalendar = []string{
 	"text",
