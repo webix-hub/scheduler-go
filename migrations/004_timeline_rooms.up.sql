@@ -1,15 +1,15 @@
-ALTER TABLE event ADD room INT NOT NULL;
+ALTER TABLE event ADD section INT NOT NULL;
 
-CREATE TABLE room
+CREATE TABLE section
 (
     id      INT auto_increment  PRIMARY KEY,
     text    VARCHAR(2048)       NOT NULL
 );
 
-INSERT INTO room (id, text) VALUES (1, "Room 1");
-INSERT INTO room (id, text) VALUES (2, "Room 2");
-INSERT INTO room (id, text) VALUES (3, "Room 3");
-INSERT INTO room (id, text) VALUES (4, "Room 4");
-INSERT INTO room (id, text) VALUES (5, "Room 5");
+INSERT INTO section (id, text) VALUES (1, "Section 1");
+INSERT INTO section (id, text) VALUES (2, "Section 2");
+INSERT INTO section (id, text) VALUES (3, "Section 3");
+INSERT INTO section (id, text) VALUES (4, "Section 4");
+INSERT INTO section (id, text) VALUES (5, "Section 5");
 
-UPDATE event SET room=FLOOR(RAND()*5)+1;
+UPDATE event SET section=FLOOR(RAND()*5)+1;
