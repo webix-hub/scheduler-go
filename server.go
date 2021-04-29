@@ -41,6 +41,7 @@ type EventInfo struct {
 	Recurring     string `json:"recurring"`
 	OriginID      int    `db:"origin_id" json:"origin_id"`
 	SeriesEndDate string `db:"series_end_date" json:"series_end_date"`
+	Section       int    `json:"section"`
 }
 
 // CalendarInfo describes calendar data fields
@@ -49,6 +50,12 @@ type CalendarInfo struct {
 	Text   string `json:"text"`
 	Color  string `json:"color"`
 	Active int    `json:"active"`
+}
+
+//SectionInfo describes data fields for sections (used by timeline view)
+type SectionInfo struct {
+	ID   int    `json:"id"`
+	Text string `json:"text"`
 }
 
 //
@@ -262,6 +269,18 @@ func main() {
 		format.JSON(w, 200, Response{ID: strconv.FormatInt(id, 10)})
 	})
 
+	r.Get("/sections", func(w http.ResponseWriter, r *http.Request) {
+		data := make([]SectionInfo, 0)
+		err := conn.Select(&data, "SELECT section.* FROM section")
+
+		if err != nil {
+			format.Text(w, 500, err.Error())
+			return
+		}
+
+		format.JSON(w, 200, data)
+	})
+
 	log.Printf("Starting webserver at port " + Config.Port)
 	http.ListenAndServe(Config.Port, r)
 }
@@ -278,6 +297,7 @@ var whitelistEvent = []string{
 	"calendar",
 	"origin_id",
 	"series_end_date",
+	"section",
 }
 var whitelistCalendar = []string{
 	"text",
